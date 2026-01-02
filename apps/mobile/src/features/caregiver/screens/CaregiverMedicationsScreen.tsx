@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, TextInput, Pressable } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView } from "react-native";
 import { usePocStore } from "../../../app/PocStore";
-import { ScrollView } from "react-native";
 
 function SmallButton(props: {
   label: string;
@@ -21,7 +20,13 @@ function SmallButton(props: {
         opacity: pressed ? 0.7 : 1,
       })}
     >
-      <Text style={{ fontSize: 13, fontWeight: "900", opacity: destructive ? 0.9 : 1 }}>
+      <Text
+        style={{
+          fontSize: 13,
+          fontWeight: "900",
+          opacity: destructive ? 0.9 : 1,
+        }}
+      >
         {label}
       </Text>
     </Pressable>
@@ -53,9 +58,23 @@ export default function CaregiverMedicationsScreen() {
   const [editName, setEditName] = useState("");
   const [editInstructions, setEditInstructions] = useState("");
 
-  const medsForElder = medications
-    .filter((m) => m.elderId === selectedElderId)
-    .sort((a, b) => Number(b.active) - Number(a.active)); // active first
+  const medsForElder = useMemo(() => {
+    return medications
+      .filter((m) => m.elderId === selectedElderId)
+      .sort((a, b) => Number(b.active) - Number(a.active)); // active first
+  }, [medications, selectedElderId]);
+
+  const recentTaken = useMemo(() => {
+    return doses
+      .filter(
+        (d) =>
+          d.elderId === selectedElderId &&
+          d.status === "taken" &&
+          !!d.takenAtISO
+      )
+      .sort((a, b) => (b.takenAtISO! > a.takenAtISO! ? 1 : -1))
+      .slice(0, 5);
+  }, [doses, selectedElderId]);
 
   const startEdit = (medId: string) => {
     const med = medsForElder.find((m) => m.id === medId);
@@ -80,10 +99,10 @@ export default function CaregiverMedicationsScreen() {
 
   return (
     <ScrollView
-  style={{ flex: 1 }}
-  contentContainerStyle={{ padding: 24, gap: 12, paddingBottom: 40 }}
-  keyboardShouldPersistTaps="handled"
->
+      style={{ flex: 1 }}
+      contentContainerStyle={{ padding: 24, gap: 12, paddingBottom: 40 }}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={{ fontSize: 28, fontWeight: "900" }}>Medications</Text>
       <Text style={{ fontSize: 16, opacity: 0.8 }}>{elderName}</Text>
 
@@ -127,11 +146,61 @@ export default function CaregiverMedicationsScreen() {
         </Pressable>
       </View>
 
+      {/* Recent activity */}
+      <View style={{ marginTop: 12, gap: 8 }}>
+        <Text style={{ fontSize: 14, fontWeight: "800", opacity: 0.8 }}>
+          Recent activity
+        </Text>
+
+        {recentTaken.length === 0 ? (
+          <Text style={{ fontSize: 13, opacity: 0.7 }}>
+            No doses marked as taken yet.
+          </Text>
+        ) : (
+          <View style={{ gap: 8 }}>
+            {recentTaken.map((d) => (
+              <View
+                key={d.id}
+                style={{
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 12,
+                  gap: 4,
+                }}
+              >
+                <Text style={{ fontSize: 14, fontWeight: "900" }}>
+                  {d.medicationName}
+                </Text>
+                <Text style={{ fontSize: 12, opacity: 0.75 }}>
+                  Taken: {new Date(d.takenAtISO!).toLocaleString()}
+                </Text>
+                <Text style={{ fontSize: 12, opacity: 0.75 }}>
+                  Slot: {d.slot} • Date: {d.dateISO}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+
       {/* Med list */}
       <View style={{ marginTop: 16, gap: 10 }}>
         {medsForElder.map((m) => {
-          const latestDose = doses.filter((d) => d.medicationId === m.id).slice(0, 1)[0];
-          const status = latestDose?.status ?? "—";
+          // Get latest relevant dose for this medication + elder
+          const related = doses
+            .filter((d) => d.elderId === selectedElderId && d.medicationId === m.id)
+            .sort((a, b) => {
+              // Prefer takenAtISO for ordering when present; otherwise keep stable
+              const aKey = a.takenAtISO ?? "";
+              const bKey = b.takenAtISO ?? "";
+              return bKey.localeCompare(aKey);
+            });
+
+          const lastDose = related[0];
+          const lastStatus = lastDose?.status ?? "—";
+          const lastTakenAt = lastDose?.takenAtISO
+            ? new Date(lastDose.takenAtISO).toLocaleString()
+            : null;
 
           const isEditing = editingId === m.id;
 
@@ -150,12 +219,25 @@ export default function CaregiverMedicationsScreen() {
                 <>
                   <View style={{ gap: 4 }}>
                     <Text style={{ fontSize: 18, fontWeight: "900" }}>{m.name}</Text>
+
                     {!!m.instructions && (
                       <Text style={{ fontSize: 14, opacity: 0.85 }}>{m.instructions}</Text>
                     )}
+
                     <Text style={{ fontSize: 13, opacity: 0.75 }}>
-                      Latest dose status: {status}
+                      Last status: {String(lastStatus).toUpperCase()}
                     </Text>
+
+                    {lastTakenAt ? (
+                      <Text style={{ fontSize: 12, opacity: 0.75 }}>
+                        Last taken: {lastTakenAt}
+                      </Text>
+                    ) : lastDose ? (
+                      <Text style={{ fontSize: 12, opacity: 0.75 }}>
+                        Slot: {lastDose.slot} • Date: {lastDose.dateISO}
+                      </Text>
+                    ) : null}
+
                     <Text style={{ fontSize: 13, fontWeight: "800" }}>
                       {m.active ? "Active" : "Inactive"}
                     </Text>
