@@ -21,6 +21,11 @@ type PocActions = {
   getDosesForSlot: (elderId: string, dateISO: string, slot: ScheduleSlot) => DoseOccurrence[];
   markDoseTakenOptimistic: (doseOccurrenceId: string, takenAt: Date) => { rollback: () => void };
   markDoseTakenFinalize: (doseOccurrenceId: string) => void;
+  
+  //CRUD for medications
+  updateMedication: (medicationId: string, patch: { name?: string; instructions?: string }) => void;
+  setMedicationActive: (medicationId: string, active: boolean) => void;
+
 
 };
 
@@ -63,6 +68,36 @@ export function PocStoreProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<PocStoreValue>(() => {
     const selectElder = (elderId: string) => {
       setState((s) => ({ ...s, selectedElderId: elderId }));
+    };
+
+    //CRUD for medications
+    const updateMedication = (medicationId: string, patch: { name?: string; instructions?: string }) => {
+      setState((s) => ({
+        ...s,
+        medications: s.medications.map((m) => {
+          if (m.id !== medicationId) return m;
+          return {
+            ...m,
+            name: patch.name !== undefined ? patch.name.trim() : m.name,
+            instructions: patch.instructions !== undefined ? patch.instructions.trim() : m.instructions,
+          };
+        }),
+        // keep denormalized medicationName in doses consistent (POC only)
+        doses: s.doses.map((d) =>
+          d.medicationId === medicationId && patch.name !== undefined
+            ? { ...d, medicationName: patch.name.trim() }
+            : d
+        ),
+      }));
+    };
+
+    const setMedicationActive = (medicationId: string, active: boolean) => {
+      setState((s) => ({
+        ...s,
+        medications: s.medications.map((m) =>
+          m.id === medicationId ? { ...m, active } : m
+        ),
+      }));
     };
 
     const addMedication = (input: { name: string; instructions?: string }) => {
@@ -145,14 +180,24 @@ export function PocStoreProvider({ children }: { children: React.ReactNode }) {
     };
 
     const getDosesForSlot = (elderId: string, dateISO: string, slot: ScheduleSlot) => {
+      const activeByMedId = new Map(state.medications.map((m) => [m.id, m.active]));
+    
       return state.doses
-        .filter((d) => d.elderId === elderId && d.dateISO === dateISO && d.slot === slot)
+        .filter((d) => {
+          if (d.elderId !== elderId) return false;
+          if (d.dateISO !== dateISO) return false;
+          if (d.slot !== slot) return false;
+    
+          // Hide doses for inactive medications
+          return activeByMedId.get(d.medicationId) !== false;
+        })
         .sort((a, b) => {
-          // pending first, then taken
           if (a.status === b.status) return 0;
           return a.status === "pending" ? -1 : 1;
         });
     };
+    
+    
 
 
     return {
@@ -163,6 +208,8 @@ export function PocStoreProvider({ children }: { children: React.ReactNode }) {
       getDosesForSlot,
       markDoseTakenOptimistic,
       markDoseTakenFinalize,
+      updateMedication,
+      setMedicationActive,
     };
 
 
