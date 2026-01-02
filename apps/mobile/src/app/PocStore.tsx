@@ -18,6 +18,10 @@ type PocActions = {
 
   // convenience queries
   getDueDosesForSlot: (elderId: string, dateISO: string, slot: ScheduleSlot) => DoseOccurrence[];
+  getDosesForSlot: (elderId: string, dateISO: string, slot: ScheduleSlot) => DoseOccurrence[];
+  markDoseTakenOptimistic: (doseOccurrenceId: string, takenAt: Date) => { rollback: () => void };
+  markDoseTakenFinalize: (doseOccurrenceId: string) => void;
+
 };
 
 type PocStoreValue = PocState & PocActions;
@@ -94,7 +98,14 @@ export function PocStoreProvider({ children }: { children: React.ReactNode }) {
       });
     };
 
-    const markDoseTaken = (doseOccurrenceId: string, takenAt: Date) => {
+    const markDoseTakenOptimistic = (doseOccurrenceId: string, takenAt: Date) => {
+      // Capture previous state for rollback
+      const prev = state.doses.find((d) => d.id === doseOccurrenceId);
+      if (!prev) {
+        return { rollback: () => {} };
+      }
+
+      // Apply optimistic update
       setState((s) => ({
         ...s,
         doses: s.doses.map((d) =>
@@ -103,7 +114,25 @@ export function PocStoreProvider({ children }: { children: React.ReactNode }) {
             : d
         ),
       }));
+
+      // Rollback function
+      const rollback = () => {
+        setState((s) => ({
+          ...s,
+          doses: s.doses.map((d) =>
+            d.id === doseOccurrenceId ? prev : d
+          ),
+        }));
+      };
+
+      return { rollback };
     };
+
+    const markDoseTakenFinalize = (_doseOccurrenceId: string) => {
+      // POC: nothing to do.
+      // Future: API call + error handling; if API fails, call rollback.
+    };
+
 
     const getDueDosesForSlot = (elderId: string, dateISO: string, slot: ScheduleSlot) => {
       return state.doses.filter(
@@ -115,7 +144,28 @@ export function PocStoreProvider({ children }: { children: React.ReactNode }) {
       );
     };
 
-    return { ...state, selectElder, addMedication, markDoseTaken, getDueDosesForSlot };
+    const getDosesForSlot = (elderId: string, dateISO: string, slot: ScheduleSlot) => {
+      return state.doses
+        .filter((d) => d.elderId === elderId && d.dateISO === dateISO && d.slot === slot)
+        .sort((a, b) => {
+          // pending first, then taken
+          if (a.status === b.status) return 0;
+          return a.status === "pending" ? -1 : 1;
+        });
+    };
+
+
+    return {
+      ...state,
+      selectElder,
+      addMedication,
+      getDueDosesForSlot,
+      getDosesForSlot,
+      markDoseTakenOptimistic,
+      markDoseTakenFinalize,
+    };
+
+
   }, [state]);
 
   return <PocStoreContext.Provider value={value}>{children}</PocStoreContext.Provider>;
